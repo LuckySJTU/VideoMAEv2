@@ -2,6 +2,7 @@
 # https://github.com/github/gitignore/blob/master/Python.gitignore
 
 /checkpoints/
+/triton/
 
 # custom
 .vscode
