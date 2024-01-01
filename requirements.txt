@@ -1,6 +1,6 @@
 av
 decord
-deepspeed
+#deepspeed
 einops
 matplotlib
 numpy
