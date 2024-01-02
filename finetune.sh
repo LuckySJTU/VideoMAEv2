@@ -5,18 +5,18 @@ export LD_LIBRARY_PATH=/home/sxsong/my_cuda/cuda-11.6/targets/x86_64-linux/lib:$
 export LIBRARY_PATH=/home/sxsong/my_cuda/cuda-11.6/lib64/
 #export PATH=/home/sxsong/my_cuda/cuda-11.6/bin:$PATH
 export LDFLAGS=-L/home/sxsong/my_cuda/cuda-11.6/lib64/
-
 export NCCL_P2P_DISABLE=1
+
 # nvcc --list-gpu-arch
 OMP_NUM_THREADS=1 python -m torch.distributed.launch --nproc_per_node=8 \
         --nnodes=1 --node_rank=0 \
         run_class_finetuning.py \
         --model vit_giant_patch14_224 \
         --nb_classes 500 \
-        --data_set "LRW" \
+        --data_set LRW \
         --data_path "/home/yxwang/Dataset/LRW/videoMAE" \
-        --log_dir "/home/yxwang/videoMAE/checkpoints/test" \
-        --output_dir "/home/yxwang/videoMAE/checkpoints/test" \
+        --log_dir "/home/yxwang/videoMAE/checkpoints/ft_post_pretraining" \
+        --output_dir "/home/yxwang/videoMAE/checkpoints/ft_post_pretraining" \
         --batch_size 1 \
         --input_size 224 \
         --short_side_size 224 \
@@ -36,6 +36,6 @@ OMP_NUM_THREADS=1 python -m torch.distributed.launch --nproc_per_node=8 \
         --epochs 50 \
         --test_num_segment 5 \
         --test_num_crop 3 \
+        --finetune "/home/yxwang/videoMAE/checkpoints/post_pretraining/checkpoint-99.pth" \
         --dist_eval \
-        --enable_deepspeed \
-        --finetune "/home/yxwang/videoMAE/checkpoints/post_pretraining/checkpoint-49.pth"
+        --enable_deepspeed
