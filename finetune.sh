@@ -32,7 +32,7 @@ OMP_NUM_THREADS=1 python -m torch.distributed.launch --nproc_per_node=8 \
         --layer_decay 0.9 \
         --opt_betas 0.9 0.999 \
         --weight_decay 0.1 \
-        --warmup_epochs 5 \
+        --warmup_epochs 0 \
         --epochs 50 \
         --test_num_segment 5 \
         --test_num_crop 3 \
