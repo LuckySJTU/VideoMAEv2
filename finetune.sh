@@ -8,23 +8,23 @@ export LDFLAGS=-L/home/sxsong/my_cuda/cuda-11.6/lib64/
 export NCCL_P2P_DISABLE=1
 
 # nvcc --list-gpu-arch
-OMP_NUM_THREADS=1 python -m torch.distributed.launch --nproc_per_node=8 \
+OMP_NUM_THREADS=1 python -m torch.distributed.launch --nproc_per_node=4 \
         --nnodes=1 --node_rank=0 \
         run_class_finetuning.py \
         --model vit_giant_patch14_224 \
         --nb_classes 500 \
         --data_set LRW \
         --data_path "/home/yxwang/Dataset/LRW/videoMAE" \
-        --log_dir "/home/yxwang/videoMAE/checkpoints/ft_post_pretraining" \
-        --output_dir "/home/yxwang/videoMAE/checkpoints/ft_post_pretraining" \
-        --batch_size 1 \
+        --log_dir "/home/yxwang/videoMAE/checkpoints/ft_test" \
+        --output_dir "/home/yxwang/videoMAE/checkpoints/ft_test" \
+        --batch_size 2 \
         --input_size 224 \
         --short_side_size 224 \
         --save_ckpt_freq 10 \
         --num_frames 16 \
         --sampling_rate 4 \
         --num_sample 2 \
-        --num_workers 10 \
+        --num_workers 1 \
         --opt adamw \
         --lr 1e-4 \
         --drop_path 0.3 \

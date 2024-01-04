@@ -581,46 +581,58 @@ def create_ds_config(args):
                     "eps": 1e-8
                 }
             },
+            # "fp16": {
+            #     "enabled": True,
+            #     "loss_scale": 0,
+            #     "initial_scale_power": 7,
+            #     "loss_scale_window": 128
+            # },
             "fp16": {
                 "enabled": True,
+                "auto_cast": False,
                 "loss_scale": 0,
-                "initial_scale_power": 7,
-                "loss_scale_window": 128
+                "initial_scale_power": 16,
+                "loss_scale_window": 1000,
+                "hysteresis": 2,
+                "consecutive_hysteresis": False,
+                "min_loss_scale": 1
             },
-            "zero_optimization": {
-                "stage": 2,
-                "offload_optimizer": {
-                    "device": "cpu",
-                    "pin_memory": True,
-                },
-                "allgather_partitions": True,
-                "allgather_bucket_size": 2e8,
-                "overlap_comm": True,
-                "reduce_scatter": True,
-                "reduce_bucket_size": 2e8,
-                "contiguous_gradients": True,
-            },
+
+            ## https://www.deepspeed.ai/docs/config-json/
             # "zero_optimization": {
-            #     "stage": 3,
+            #     "stage": 2,
             #     "offload_optimizer": {
             #         "device": "cpu",
             #         "pin_memory": True,
             #     },
-            #     "offload_param": {
-            #         "device": "cpu",
-            #         "pin_memory": True,
-            #     },
+            #     "allgather_partitions": True,
+            #     "allgather_bucket_size": 2e8,
             #     "overlap_comm": True,
+            #     "reduce_scatter": True,
+            #     "reduce_bucket_size": 2e8,
             #     "contiguous_gradients": True,
-            #     "sub_group_size": 1e8,
-            #     "reduce_bucket_size": "auto",
-            #     "stage3_prefetch_bucket_size": "auto",
-            #     "stage3_param_persistence_threshold": "auto",
-            #     "stage3_max_live_parameters": 1e8,
-            #     "stage3_max_reuse_distance": 1e8,
-            #     "stage3_gather_16bit_weights_on_model_save": True,
-            #     "gradient_accumulation_steps": "auto",
             # },
+            "zero_optimization": {
+                "stage": 3,
+                "offload_optimizer": {
+                    "device": "cpu",
+                    "pin_memory": True,
+                },
+                "offload_param": {
+                    "device": "cpu",
+                    "pin_memory": True,
+                },
+                "overlap_comm": True,
+                "contiguous_gradients": True,
+                "sub_group_size": 2e8,
+                "reduce_bucket_size": 2e8,
+                "stage3_prefetch_bucket_size": 2e8,
+                "stage3_param_persistence_threshold": 2e8,
+                "stage3_max_live_parameters": 2e8,
+                "stage3_max_reuse_distance": 2e8,
+                "stage3_gather_16bit_weights_on_model_save": False,
+                "gradient_accumulation_steps": "auto",
+            },
         }
 
         # ds_config = {
