@@ -633,6 +633,15 @@ def create_ds_config(args):
                 "stage3_gather_16bit_weights_on_model_save": False,
                 "gradient_accumulation_steps": "auto",
             },
+            # "activation_checkpointing": {
+            #     "partition_activations": True,
+            #     "cpu_checkpointing": True,
+            #     "contiguous_memory_optimization": True,
+            #     "number_checkpoints": 10,
+            #     "synchronize_checkpoint_boundary": True,
+            #     "profile": True,
+            # },
+
         }
 
         # ds_config = {

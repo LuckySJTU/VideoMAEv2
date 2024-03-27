@@ -22,7 +22,10 @@ import utils
 
 def train_class_batch(model, samples, target, criterion):
     outputs = model(samples)
-    loss = criterion(outputs, target)
+    loss = criterion(outputs+1e-8, target)
+    if loss is torch.nan:
+        print(loss)
+        # breakpoint()
     return loss, outputs
 
 
@@ -63,8 +66,15 @@ def train_one_epoch(model: torch.nn.Module,
     else:
         optimizer.zero_grad()
 
+    my_count = 0
     for data_iter_step, (samples, targets, _, _) in enumerate(
             metric_logger.log_every(data_loader, print_freq, header)):
+        my_count += 1
+        # print(my_count)
+        if my_count>6927:
+            # breakpoint()
+            print(my_count)
+        
         step = data_iter_step // update_freq
         if step >= num_training_steps_per_epoch:
             continue

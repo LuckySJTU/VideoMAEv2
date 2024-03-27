@@ -43,6 +43,8 @@ from optim_factory import (
 from utils import NativeScalerWithGradNormCount as NativeScaler
 from utils import multiple_samples_collate
 
+from torch.distributed.elastic.multiprocessing.errors import record
+
 
 def get_args():
     parser = argparse.ArgumentParser(
@@ -402,7 +404,7 @@ def get_args():
 
     return parser.parse_args(), ds_init
 
-
+@record
 def main(args, ds_init):
     utils.init_distributed_mode(args)
 
@@ -687,7 +689,7 @@ def main(args, ds_init):
     n_parameters = sum(p.numel() for p in model.parameters()
                        if p.requires_grad)
 
-    print("Model = %s" % str(model_without_ddp))
+    #print("Model = %s" % str(model_without_ddp))
     print('number of params:', n_parameters)
 
     total_batch_size = args.batch_size * args.update_freq * num_tasks
