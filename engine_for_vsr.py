@@ -66,7 +66,6 @@ def train_one_epoch(model: torch.nn.Module,
     else:
         optimizer.zero_grad()
 
-    my_count = 0
     for data_iter_step, (samples, targets, _, _) in enumerate(
             metric_logger.log_every(data_loader, print_freq, header)):
         

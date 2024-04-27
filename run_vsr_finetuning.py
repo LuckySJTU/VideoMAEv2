@@ -29,7 +29,7 @@ from timm.utils import ModelEma
 import models  # noqa: F401
 import utils
 from dataset import build_dataset
-from engine_for_finetuning import (
+from engine_for_vsr import (
     final_test,
     merge,
     train_one_epoch,
@@ -304,7 +304,7 @@ def get_args():
         help='dataset path for evaluation')
     parser.add_argument(
         '--nb_classes',
-        default=400,
+        default=39, #400
         type=int,
         help='number of the classification types')
     parser.add_argument(
@@ -318,7 +318,7 @@ def get_args():
         default='Kinetics-400',
         choices=[
             'Kinetics-400', 'Kinetics-600', 'Kinetics-700', 'SSV2', 'UCF101',
-            'HMDB51', 'Diving48', 'Kinetics-710', 'MIT', "LRW"
+            'HMDB51', 'Diving48', 'Kinetics-710', 'MIT', "LRW", "LRS2"
         ],
         type=str,
         help='dataset')
