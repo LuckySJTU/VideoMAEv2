@@ -6,7 +6,7 @@
 a.out
 include
 multi_tensor_adam.cuda.o
-vit_g_hybrid_pt_1200e.pth
+*.pth
 
 # custom
 .vscode

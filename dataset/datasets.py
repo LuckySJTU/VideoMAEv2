@@ -327,6 +327,16 @@ class VideoClsDataset(Dataset):
             return len(self.test_dataset)
 
 
+# CHAR_TO_INDEX= {" ": 1, "'": 22, "1": 30, "0": 29, "3": 37, "2": 32, "5": 34, "4": 38, "7": 36, "6": 35, "9": 31, "8": 33, "A": 5, "C": 17,
+#                 "B": 20, "E": 2, "D": 12, "G": 16, "F": 19, "I": 6, "H": 9, "K": 24, "J": 25, "M": 18, "L": 11, "O": 4, "N": 7, "Q": 27,
+#                 "P": 21, "S": 8, "R": 10, "U": 13, "T": 3, "W": 15, "V": 23, "Y": 14, "X": 26, "Z": 28, "<EOS>": 39}
+
+# def text2idx(sentence):
+#     ans = [CHAR_TO_INDEX[c] for c in sentence.upper()]
+#     ans.append(CHAR_TO_INDEX['<EOS>'])
+#     return ans
+
+
 class VSRDataset(Dataset):
     """Load your own video speech recognition dataset."""
 
@@ -374,9 +384,9 @@ class VSRDataset(Dataset):
         self.video_loader = get_video_loader()
 
         cleaned = pd.read_csv(self.anno_path, header=None, delimiter=',') # data preprocessing
-        self.dataset_samples = list(
-            cleaned[0].apply(lambda row: os.path.join(self.data_root, row)))
+        self.dataset_samples = list(cleaned[0].apply(lambda row: os.path.join(self.data_root, row)))
         self.label_array = list(cleaned.values[:, 1])
+        # self.label_array = list(map(text2idx, self.label_array))
 
         if (mode == 'train'):
             pass
@@ -413,110 +423,37 @@ class VSRDataset(Dataset):
                         self.test_seg.append((ck, cp))
 
     def __getitem__(self, index):
-        if self.mode == 'train':
-            args = self.args
-            scale_t = 1
+        args = self.args
+        scale_t = 1
 
-            sample = self.dataset_samples[index]
-            # T H W C
-            buffer = self.load_video(sample, sample_rate_scale=scale_t)
-            if len(buffer) == 0:
-                while len(buffer) == 0:
-                    warnings.warn(
-                        "video {} not correctly loaded during training".format(
-                            sample))
-                    index = np.random.randint(self.__len__())
-                    sample = self.dataset_samples[index]
-                    buffer = self.load_video(sample, sample_rate_scale=scale_t)
-
-            if args.num_sample > 1:
-                frame_list = []
-                label_list = []
-                index_list = []
-                for _ in range(args.num_sample):
-                    new_frames = self._aug_frame(buffer, args)
-                    label = self.label_array[index]
-                    frame_list.append(new_frames)
-                    label_list.append(label)
-                    index_list.append(index)
-                return frame_list, label_list, index_list, {}
-            else:
-                buffer = self._aug_frame(buffer, args)
-
-            return buffer, self.label_array[index], index, {}
-
-        elif self.mode == 'validation':
-            sample = self.dataset_samples[index]
-            buffer = self.load_video(sample)
-            if len(buffer) == 0:
-                while len(buffer) == 0:
-                    warnings.warn(
-                        "video {} not correctly loaded during validation".
-                        format(sample))
-                    index = np.random.randint(self.__len__())
-                    sample = self.dataset_samples[index]
-                    buffer = self.load_video(sample)
-            buffer = self.data_transform(buffer)
-            return buffer, self.label_array[index], sample.split(
-                "/")[-1].split(".")[0]
-
-        elif self.mode == 'test':
-            sample = self.test_dataset[index]
-            chunk_nb, split_nb = self.test_seg[index]
-            buffer = self.load_video(sample)
-
+        sample = self.dataset_samples[index]
+        # T H W C
+        buffer = self.load_video(sample, sample_rate_scale=scale_t)
+        if len(buffer) == 0:
             while len(buffer) == 0:
                 warnings.warn(
-                    "video {}, temporal {}, spatial {} not found during testing"
-                    .format(str(self.test_dataset[index]), chunk_nb, split_nb))
+                    "video {} not correctly loaded during".format(
+                        sample))
                 index = np.random.randint(self.__len__())
-                sample = self.test_dataset[index]
-                chunk_nb, split_nb = self.test_seg[index]
-                buffer = self.load_video(sample)
+                sample = self.dataset_samples[index]
+                buffer = self.load_video(sample, sample_rate_scale=scale_t)
 
-            buffer = self.data_resize(buffer)
-            if isinstance(buffer, list):
-                buffer = np.stack(buffer, 0)
-
-            if self.sparse_sample:
-                spatial_step = 1.0 * (max(buffer.shape[1], buffer.shape[2]) -
-                                      self.short_side_size) / (
-                                          self.test_num_crop - 1)
-                temporal_start = chunk_nb
-                spatial_start = int(split_nb * spatial_step)
-                if buffer.shape[1] >= buffer.shape[2]:
-                    buffer = buffer[temporal_start::self.test_num_segment,
-                                    spatial_start:spatial_start +
-                                    self.short_side_size, :, :]
-                else:
-                    buffer = buffer[temporal_start::self.test_num_segment, :,
-                                    spatial_start:spatial_start +
-                                    self.short_side_size, :]
-            else:
-                spatial_step = 1.0 * (max(buffer.shape[1], buffer.shape[2]) -
-                                      self.short_side_size) / (
-                                          self.test_num_crop - 1)
-                temporal_step = max(
-                    1.0 * (buffer.shape[0] - self.clip_len) /
-                    (self.test_num_segment - 1), 0)
-                temporal_start = int(chunk_nb * temporal_step)
-                spatial_start = int(split_nb * spatial_step)
-                if buffer.shape[1] >= buffer.shape[2]:
-                    buffer = buffer[temporal_start:temporal_start +
-                                    self.clip_len,
-                                    spatial_start:spatial_start +
-                                    self.short_side_size, :, :]
-                else:
-                    buffer = buffer[temporal_start:temporal_start +
-                                    self.clip_len, :,
-                                    spatial_start:spatial_start +
-                                    self.short_side_size, :]
-
-            buffer = self.data_transform(buffer)
-            return buffer, self.test_label_array[index], sample.split(
-                "/")[-1].split(".")[0], chunk_nb, split_nb
+        if args.num_sample > 1:
+            frame_list = []
+            label_list = []
+            index_list = []
+            for _ in range(args.num_sample):
+                new_frames = self._aug_frame(buffer, args)
+                label = self.label_array[index]
+                frame_list.append(new_frames)
+                label_list.append(label)
+                index_list.append(index)
+            return frame_list, label_list, index_list, {}
         else:
-            raise NameError('mode {} unkown'.format(self.mode))
+            buffer = self._aug_frame(buffer, args)
+
+        return buffer, self.label_array[index], buffer.shape[1], len(self.label_array[index])
+
 
     def _aug_frame(self, buffer, args):
         aug_transform = video_transforms.create_random_augment(
@@ -608,28 +545,29 @@ class VSRDataset(Dataset):
         converted_len = int(self.clip_len * self.frame_sample_rate)
         seg_len = length // self.num_segment
 
-        all_index = []
-        for i in range(self.num_segment):
-            if seg_len <= converted_len:
-                index = np.linspace(
-                    0, seg_len, num=seg_len // self.frame_sample_rate)
-                index = np.concatenate(
-                    (index,
-                     np.ones(self.clip_len - seg_len // self.frame_sample_rate)
-                     * seg_len))
-                index = np.clip(index, 0, seg_len - 1).astype(np.int64)
-            else:
-                if self.mode == 'validation':
-                    end_idx = (converted_len + seg_len) // 2
-                else:
-                    end_idx = np.random.randint(converted_len, seg_len)
-                str_idx = end_idx - converted_len
-                index = np.linspace(str_idx, end_idx, num=self.clip_len)
-                index = np.clip(index, str_idx, end_idx - 1).astype(np.int64)
-            index = index + i * seg_len
-            all_index.extend(list(index))
+        # all_index = []
+        # for i in range(self.num_segment):
+        #     if seg_len <= converted_len:
+        #         index = np.linspace(
+        #             0, seg_len, num=seg_len // self.frame_sample_rate)
+        #         index = np.concatenate(
+        #             (index,
+        #              np.ones(self.clip_len - seg_len // self.frame_sample_rate)
+        #              * seg_len))
+        #         index = np.clip(index, 0, seg_len - 1).astype(np.int64)
+        #     else:
+        #         if self.mode == 'validation':
+        #             end_idx = (converted_len + seg_len) // 2
+        #         else:
+        #             end_idx = np.random.randint(converted_len, seg_len)
+        #         str_idx = end_idx - converted_len
+        #         index = np.linspace(str_idx, end_idx, num=self.clip_len)
+        #         index = np.clip(index, str_idx, end_idx - 1).astype(np.int64)
+        #     index = index + i * seg_len
+        #     all_index.extend(list(index))
 
-        all_index = all_index[::int(sample_rate_scale)]
+        # all_index = all_index[::int(sample_rate_scale)]
+        all_index = list(range(length))
         vr.seek(0)
         buffer = vr.get_batch(all_index).asnumpy()
         return buffer

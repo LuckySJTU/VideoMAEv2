@@ -19,20 +19,51 @@ from timm.utils import ModelEma, accuracy
 
 import utils
 
+from torch.nn.utils.rnn import pad_sequence
+from decoders import ctc_greedy_decode, compute_CTC_prob
+from metrics import compute_error_ch, compute_error_word
 
-def train_class_batch(model, samples, target, criterion):
-    outputs = model(samples)
-    loss = criterion(outputs+1e-8, target)
+def train_class_batch(model, samples, target, src_len, tgt_len, criterion):
+    Alpha = 0.2
+    inputLenBatch, outputBatch = model(samples, target, src_len, tgt_len)
+
+    tgt_list = [target[i][:tgt_len[i]-1] for i in range(len(tgt_len))]
+    tgt_out_batch = pad_sequence(tgt_list, batch_first=True)
+    targetMask = torch.zeros_like(tgt_out_batch, device=samples.device)
+    targetMask[(torch.arange(targetMask.shape[0]), tgt_len.long() - 2)] = 1
+    targetMask = (1 - targetMask.flip([-1]).cumsum(-1).flip([-1])).bool()
+    concatTargetoutBatch = tgt_out_batch[~targetMask]
+
+    with torch.backends.cudnn.flags(enabled=False):
+        ctcloss = model.CTCloss(outputBatch[0], concatTargetoutBatch, inputLenBatch, tgt_len-1)
+        celoss = model.CEloss(outputBatch[1], tgt_out_batch.long())
+        loss = Alpha * ctcloss + (1 - Alpha) * celoss
     if loss is torch.nan:
         print(loss)
         # breakpoint()
-    return loss, outputs
+
+    predictionBatch, predictionLenBatch = ctc_greedy_decode(outputBatch[0].detach(), inputLenBatch, CHAR_TO_INDEX['<EOS>'])
+    c_edits, c_count = compute_error_ch(predictionBatch, concatTargetoutBatch, predictionLenBatch, tgt_len-1)
+    cer = c_edits / c_count
+    w_edits, w_count = compute_error_word(predictionBatch, concatTargetoutBatch, predictionLenBatch, tgt_len-1, CHAR_TO_INDEX[' '])
+    wer = w_edits / w_count
+    return loss, cer, wer
 
 
 def get_loss_scale_for_deepspeed(model):
     optimizer = model.optimizer
     return optimizer.loss_scale if hasattr(
         optimizer, "loss_scale") else optimizer.cur_scale
+
+
+CHAR_TO_INDEX= {" ": 1, "'": 22, "1": 30, "0": 29, "3": 37, "2": 32, "5": 34, "4": 38, "7": 36, "6": 35, "9": 31, "8": 33, "A": 5, "C": 17,
+                "B": 20, "E": 2, "D": 12, "G": 16, "F": 19, "I": 6, "H": 9, "K": 24, "J": 25, "M": 18, "L": 11, "O": 4, "N": 7, "Q": 27,
+                "P": 21, "S": 8, "R": 10, "U": 13, "T": 3, "W": 15, "V": 23, "Y": 14, "X": 26, "Z": 28, "<EOS>": 39}
+
+def text2idx(sentence):
+    ans = [CHAR_TO_INDEX[c] for c in sentence.upper()]
+    ans.append(CHAR_TO_INDEX['<EOS>'])
+    return ans
 
 
 def train_one_epoch(model: torch.nn.Module,
@@ -66,9 +97,7 @@ def train_one_epoch(model: torch.nn.Module,
     else:
         optimizer.zero_grad()
 
-    for data_iter_step, (samples, targets, _, _) in enumerate(
-            metric_logger.log_every(data_loader, print_freq, header)):
-        
+    for data_iter_step, (samples, targets, src_len, tgt_len) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
         step = data_iter_step // update_freq
         if step >= num_training_steps_per_epoch:
             continue
@@ -84,6 +113,8 @@ def train_one_epoch(model: torch.nn.Module,
                     param_group["weight_decay"] = wd_schedule_values[it]
 
         samples = samples.to(device, non_blocking=True)
+        # tgt = [torch.tensor(text2idx(s)) for s in targets]
+        # tgt = pad_sequence(tgt, batch_first = True)
         targets = targets.to(device, non_blocking=True)
 
         if mixup_fn is not None:
@@ -95,12 +126,10 @@ def train_one_epoch(model: torch.nn.Module,
 
         if loss_scaler is None:
             samples = samples.half()
-            loss, output = train_class_batch(model, samples, targets,
-                                             criterion)
+            loss, cer, wer = train_class_batch(model, samples, targets, src_len, tgt_len, criterion)
         else:
             with torch.cuda.amp.autocast(dtype=torch.bfloat16):
-                loss, output = train_class_batch(model, samples, targets,
-                                                 criterion)
+                loss, cer, wer = train_class_batch(model, samples, targets, src_len, tgt_len, criterion)
 
         loss_value = loss.item()
 
@@ -140,12 +169,13 @@ def train_one_epoch(model: torch.nn.Module,
 
         torch.cuda.synchronize()
 
-        if mixup_fn is None:
-            class_acc = (output.max(-1)[-1] == targets).float().mean()
-        else:
-            class_acc = None
+        # if mixup_fn is None:
+        #     class_acc = (output.max(-1)[-1] == targets).float().mean()
+        # else:
+        #     class_acc = None
         metric_logger.update(loss=loss_value)
-        metric_logger.update(class_acc=class_acc)
+        metric_logger.update(cer=cer)
+        metric_logger.update(wer=wer)
         metric_logger.update(loss_scale=loss_scale_value)
         min_lr = 10.
         max_lr = 0.
@@ -164,7 +194,8 @@ def train_one_epoch(model: torch.nn.Module,
 
         if log_writer is not None:
             log_writer.update(loss=loss_value, head="loss")
-            log_writer.update(class_acc=class_acc, head="loss")
+            log_writer.update(cer=cer, head="loss")
+            log_writer.update(wer=wer, head="loss")
             log_writer.update(loss_scale=loss_scale_value, head="opt")
             log_writer.update(lr=max_lr, head="opt")
             log_writer.update(min_lr=min_lr, head="opt")
@@ -330,3 +361,13 @@ def compute_video(lst):
     top1 = (int(pred) == int(label)) * 1.0
     top5 = (int(label) in np.argsort(-feat)[:5]) * 1.0
     return [pred, top1, top5, int(label)]
+
+
+def collate_func(batch):
+    src = pad_sequence([data[0].permute(1,0,2,3) for data in batch], batch_first=True).transpose(1,2)
+    # B x 3 x T x H x W
+    tgt = pad_sequence([torch.tensor(text2idx(data[1])) for data in batch], batch_first=True)
+    # B x T
+    src_len = torch.tensor([data[2] for data in batch])
+    tgt_len = torch.tensor([data[3]+1 for data in batch])
+    return src, tgt, src_len, tgt_len

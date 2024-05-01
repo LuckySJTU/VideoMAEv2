@@ -34,6 +34,7 @@ from engine_for_vsr import (
     merge,
     train_one_epoch,
     validation_one_epoch,
+    collate_func,
 )
 from optim_factory import (
     LayerDecayValueAssigner,
@@ -459,10 +460,10 @@ def main(args, ds_init):
     else:
         log_writer = None
 
-    if args.num_sample > 1:
-        collate_func = partial(multiple_samples_collate, fold=False)
-    else:
-        collate_func = None
+    # if args.num_sample > 1:
+    #     collate_func = partial(multiple_samples_collate, fold=False)
+    # else:
+    #     collate_func = None
 
     data_loader_train = torch.utils.data.DataLoader(
         dataset_train,
@@ -499,18 +500,18 @@ def main(args, ds_init):
         data_loader_test = None
 
     mixup_fn = None
-    mixup_active = args.mixup > 0 or args.cutmix > 0. or args.cutmix_minmax is not None
-    if mixup_active:
-        print("Mixup is activated!")
-        mixup_fn = Mixup(
-            mixup_alpha=args.mixup,
-            cutmix_alpha=args.cutmix,
-            cutmix_minmax=args.cutmix_minmax,
-            prob=args.mixup_prob,
-            switch_prob=args.mixup_switch_prob,
-            mode=args.mixup_mode,
-            label_smoothing=args.smoothing,
-            num_classes=args.nb_classes)
+    # mixup_active = args.mixup > 0 or args.cutmix > 0. or args.cutmix_minmax is not None
+    # if mixup_active:
+    #     print("Mixup is activated!")
+    #     mixup_fn = Mixup(
+    #         mixup_alpha=args.mixup,
+    #         cutmix_alpha=args.cutmix,
+    #         cutmix_minmax=args.cutmix_minmax,
+    #         prob=args.mixup_prob,
+    #         switch_prob=args.mixup_switch_prob,
+    #         mode=args.mixup_mode,
+    #         label_smoothing=args.smoothing,
+    #         num_classes=args.nb_classes)
 
     model = create_model(
         args.model,
@@ -529,7 +530,7 @@ def main(args, ds_init):
         with_cp=args.with_checkpoint,
     )
 
-    patch_size = model.patch_embed.patch_size
+    patch_size = model.pre_model.patch_embed.patch_size
     print("Patch size = %s" % str(patch_size))
 
     args.window_size = (args.num_frames // args.tubelet_size,
@@ -560,7 +561,7 @@ def main(args, ds_init):
                 checkpoint_model[new_key] = checkpoint_model.pop(old_key)
 
         state_dict = model.state_dict()
-        for k in ['head.weight', 'head.bias']:
+        for k in ['pre_model.head.weight', 'pre_model.head.bias']:
             if k in checkpoint_model and checkpoint_model[
                     k].shape != state_dict[k].shape:
                 if checkpoint_model[k].shape[
@@ -594,17 +595,17 @@ def main(args, ds_init):
         if 'pos_embed' in checkpoint_model:
             pos_embed_checkpoint = checkpoint_model['pos_embed']
             embedding_size = pos_embed_checkpoint.shape[-1]  # channel dim
-            num_patches = model.patch_embed.num_patches  #
-            num_extra_tokens = model.pos_embed.shape[-2] - num_patches  # 0/1
+            num_patches = model.pre_model.patch_embed.num_patches  #
+            num_extra_tokens = model.pre_model.pos_embed.shape[-2] - num_patches  # 0/1
 
             # height (== width) for the checkpoint position embedding
             orig_size = int(
                 ((pos_embed_checkpoint.shape[-2] - num_extra_tokens) //
-                 (args.num_frames // model.patch_embed.tubelet_size))**0.5)
+                 (args.num_frames // model.pre_model.patch_embed.tubelet_size))**0.5)
             # height (== width) for the new position embedding
             new_size = int(
                 (num_patches //
-                 (args.num_frames // model.patch_embed.tubelet_size))**0.5)
+                 (args.num_frames // model.pre_model.patch_embed.tubelet_size))**0.5)
             # class_token and dist_token are kept unchanged
             if orig_size != new_size:
                 print("Position interpolate from %dx%d to %dx%d" %
@@ -614,7 +615,7 @@ def main(args, ds_init):
                 pos_tokens = pos_embed_checkpoint[:, num_extra_tokens:]
                 # B, L, C -> BT, H, W, C -> BT, C, H, W
                 pos_tokens = pos_tokens.reshape(
-                    -1, args.num_frames // model.patch_embed.tubelet_size,
+                    -1, args.num_frames // model.pre_model.patch_embed.tubelet_size,
                     orig_size, orig_size, embedding_size)
                 pos_tokens = pos_tokens.reshape(-1, orig_size, orig_size,
                                                 embedding_size).permute(
@@ -626,13 +627,13 @@ def main(args, ds_init):
                     align_corners=False)
                 # BT, C, H, W -> BT, H, W, C ->  B, T, H, W, C
                 pos_tokens = pos_tokens.permute(0, 2, 3, 1).reshape(
-                    -1, args.num_frames // model.patch_embed.tubelet_size,
+                    -1, args.num_frames // model.pre_model.patch_embed.tubelet_size,
                     new_size, new_size, embedding_size)
                 pos_tokens = pos_tokens.flatten(1, 3)  # B, L, C
                 new_pos_embed = torch.cat((extra_tokens, pos_tokens), dim=1)
                 checkpoint_model['pos_embed'] = new_pos_embed
         elif args.input_size != 224:
-            pos_tokens = model.pos_embed
+            pos_tokens = model.pre_model.pos_embed
             org_num_frames = 16
             T = org_num_frames // args.tubelet_size
             P = int((pos_tokens.shape[1] // T)**0.5)
@@ -650,11 +651,11 @@ def main(args, ds_init):
             pos_tokens = pos_tokens.permute(0, 2, 3,
                                             1).reshape(-1, T, new_P, new_P, C)
             pos_tokens = pos_tokens.flatten(1, 3)  # B, L, C
-            model.pos_embed = pos_tokens  # update
+            model.pre_model.pos_embed = pos_tokens  # update
         if args.num_frames != 16:
             org_num_frames = 16
             T = org_num_frames // args.tubelet_size
-            pos_tokens = model.pos_embed
+            pos_tokens = model.pre_model.pos_embed
             new_T = args.num_frames // args.tubelet_size
             P = int((pos_tokens.shape[1] // T)**0.5)
             C = pos_tokens.shape[2]
@@ -666,11 +667,14 @@ def main(args, ds_init):
             pos_tokens = pos_tokens.reshape(1, P, P, C,
                                             new_T).permute(0, 4, 1, 2, 3)
             pos_tokens = pos_tokens.flatten(1, 3)
-            model.pos_embed = pos_tokens  # update
+            model.pre_model.pos_embed = pos_tokens  # update
 
         utils.load_state_dict(
-            model, checkpoint_model, prefix=args.model_prefix)
+            model.pre_model, checkpoint_model, prefix=args.model_prefix)
 
+    model.pre_model.norm = torch.nn.Identity()
+    model.pre_model.head_dropout = torch.nn.Identity()
+    model.pre_model.head = torch.nn.Identity()
     model.to(device)
 
     model_ema = None
@@ -704,7 +708,7 @@ def main(args, ds_init):
     print("Number of training training per epoch = %d" %
           num_training_steps_per_epoch)
 
-    num_layers = model_without_ddp.get_num_layers()
+    num_layers = model_without_ddp.pre_model.get_num_layers()
     if args.layer_decay < 1.0:
         assigner = LayerDecayValueAssigner(
             list(args.layer_decay**(num_layers + 1 - i)
