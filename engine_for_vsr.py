@@ -221,29 +221,38 @@ def validation_one_epoch(data_loader, model, device):
     model.eval()
 
     for batch in metric_logger.log_every(data_loader, 10, header):
-        images = batch[0]
-        target = batch[1]
-        images = images.to(device, non_blocking=True)
+        src = batch[0]
+        tgt = batch[1]
+        src_len = batch[2]
+        tgt_len = batch[3]
+        src = src.to(device, non_blocking=True)
         target = target.to(device, non_blocking=True)
 
         # compute output
         with torch.cuda.amp.autocast():
-            output = model(images)
-            loss = criterion(output, target)
+            predictionBatch, predictionLenBatch = model.inference(src, tgt, src_len, tgt_len, criterion)
 
-        acc1, acc5 = accuracy(output, target, topk=(1, 5))
+        batch_size = src.shape[0]
+        tgt_list = [target[i][:tgt_len[i]-1] for i in range(len(tgt_len))]
+        tgt_out_batch = pad_sequence(tgt_list, batch_first=True)
+        targetMask = torch.zeros_like(tgt_out_batch, device=device)
+        targetMask[(torch.arange(targetMask.shape[0]), tgt_len.long() - 2)] = 1
+        targetMask = (1 - targetMask.flip([-1]).cumsum(-1).flip([-1])).bool()
+        concatTargetoutBatch = tgt_out_batch[~targetMask]
 
-        batch_size = images.shape[0]
-        metric_logger.update(loss=loss.item())
-        metric_logger.meters['acc1'].update(acc1.item(), n=batch_size)
-        metric_logger.meters['acc5'].update(acc5.item(), n=batch_size)
+        c_edits, c_count = compute_error_ch(predictionBatch, concatTargetoutBatch, predictionLenBatch, tgt_len-1)
+        w_edits, w_count = compute_error_word(predictionBatch, concatTargetoutBatch, predictionLenBatch, tgt_len-1, CHAR_TO_INDEX[' '])
+
+        metric_logger.update(loss=0)
+        metric_logger.meters['cer'].update(c_edits, n=c_count)
+        metric_logger.meters['wer'].update(w_edits, n=w_count)
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print(
-        '* Acc@1 {top1.global_avg:.3f} Acc@5 {top5.global_avg:.3f} loss {losses.global_avg:.3f}'
+        '* CER {top1.global_avg:.3f} WER {top5.global_avg:.3f} loss {losses.global_avg:.3f}'
         .format(
-            top1=metric_logger.acc1,
-            top5=metric_logger.acc5,
+            top1=metric_logger.cer,
+            top5=metric_logger.wer,
             losses=metric_logger.loss))
 
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
@@ -251,6 +260,10 @@ def validation_one_epoch(data_loader, model, device):
 
 @torch.no_grad()
 def final_test(data_loader, model, device, file):
+    evalCER = 0
+    evalWER = 0
+    evalCCount = 0
+    evalWCount = 0
     criterion = torch.nn.CrossEntropyLoss()
 
     metric_logger = utils.MetricLogger(delimiter="  ")
@@ -261,47 +274,50 @@ def final_test(data_loader, model, device, file):
     final_result = []
 
     for batch in metric_logger.log_every(data_loader, 10, header):
-        images = batch[0]
-        target = batch[1]
-        ids = batch[2]
-        chunk_nb = batch[3]
-        split_nb = batch[4]
-        images = images.to(device, non_blocking=True)
+        src = batch[0]
+        tgt = batch[1]
+        src_len = batch[2]
+        tgt_len = batch[3]
+        src = src.to(device, non_blocking=True)
         target = target.to(device, non_blocking=True)
 
         # compute output
         with torch.cuda.amp.autocast():
-            output = model(images)
-            loss = criterion(output, target)
+            predictionBatch, predictionLenBatch = model.inference(src, tgt, src_len, tgt_len, criterion)
 
-        for i in range(output.size(0)):
-            string = "{} {} {} {} {}\n".format(
-                ids[i], str(output.data[i].cpu().numpy().tolist()),
-                str(int(target[i].cpu().numpy())),
-                str(int(chunk_nb[i].cpu().numpy())),
-                str(int(split_nb[i].cpu().numpy())))
-            final_result.append(string)
+        batch_size = src.shape[0]
+        tgt_list = [target[i][:tgt_len[i]-1] for i in range(len(tgt_len))]
+        tgt_out_batch = pad_sequence(tgt_list, batch_first=True)
+        targetMask = torch.zeros_like(tgt_out_batch, device=device)
+        targetMask[(torch.arange(targetMask.shape[0]), tgt_len.long() - 2)] = 1
+        targetMask = (1 - targetMask.flip([-1]).cumsum(-1).flip([-1])).bool()
+        concatTargetoutBatch = tgt_out_batch[~targetMask]
 
-        acc1, acc5 = accuracy(output, target, topk=(1, 5))
+        c_edits, c_count = compute_error_ch(predictionBatch, concatTargetoutBatch, predictionLenBatch, tgt_len-1)
+        w_edits, w_count = compute_error_word(predictionBatch, concatTargetoutBatch, predictionLenBatch, tgt_len-1, CHAR_TO_INDEX[' '])
+        
+        evalCER += c_edits
+        evalCCount += c_count
+        evalWER += w_edits
+        evalWCount += w_count
 
-        batch_size = images.shape[0]
-        metric_logger.update(loss=loss.item())
-        metric_logger.meters['acc1'].update(acc1.item(), n=batch_size)
-        metric_logger.meters['acc5'].update(acc5.item(), n=batch_size)
+        metric_logger.update(loss=0)
+        metric_logger.meters['cer'].update(c_edits, n=c_count)
+        metric_logger.meters['wer'].update(w_edits, n=w_count)
 
     if not os.path.exists(file):
         os.mknod(file)
     with open(file, 'w') as f:
-        f.write("{}, {}\n".format(acc1, acc5))
+        f.write("{}, {}\n".format(evalCER/evalCCount if evalCCount > 0 else 1, evalWER/evalWCount if evalWCount > 0 else 1))
         for line in final_result:
             f.write(line)
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print(
-        '* Acc@1 {top1.global_avg:.3f} Acc@5 {top5.global_avg:.3f} loss {losses.global_avg:.3f}'
+        '* CER {top1.global_avg:.3f} WER {top5.global_avg:.3f} loss {losses.global_avg:.3f}'
         .format(
-            top1=metric_logger.acc1,
-            top5=metric_logger.acc5,
+            top1=metric_logger.cer,
+            top5=metric_logger.wer,
             losses=metric_logger.loss))
 
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}

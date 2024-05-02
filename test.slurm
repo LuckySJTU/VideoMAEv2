@@ -10,12 +10,12 @@ export LIBRARY_PATH=/home/yxwang/cuda/lib64/
 export LDFLAGS=-L/home/yxwang/cuda/lib64/
 export NCCL_P2P_DISABLE=1
 
-OUTPUT_DIR='/home/yxwang/videoMAE/checkpoints/ft_post_pretraining15'  # Your output folder for deepspeed config file, logs and checkpoints
+OUTPUT_DIR='/home/yxwang/videoMAE/checkpoints/ft_dl_test'  # Your output folder for deepspeed config file, logs and checkpoints
 DATA_PATH='/home/yxwang/Dataset/LRW/videoMAE'  # The data list folder. the folder has three files: train.csv, val.csv, test.csv
 # finetune data list file follows the following format
 # for the video data line: video_path, label
 # for the rawframe data line: frame_folder_path, total_frames, label
-MODEL_PATH='/home/yxwang/videoMAE/checkpoints/post_pretraining/checkpoint-99.pth'  # Model for initializing parameters
+MODEL_PATH='/home/yxwang/videoMAE/vit_s_k710_dl_from_giant.pth'  # Model for initializing parameters
 
 JOB_NAME=$1  # the job name of the slurm task
 PARTITION=${PARTITION:-"RTX4090"}  # Name of the partition
@@ -36,7 +36,7 @@ srun -p $PARTITION \
         --mem=990G \
         --kill-on-bad-exit=1 \
         python run_class_finetuning.py \
-        --model vit_giant_patch14_224 \
+        --model vit_small_patch16_224 \
         --data_set LRW \
         --nb_classes 500 \
         --data_path ${DATA_PATH} \

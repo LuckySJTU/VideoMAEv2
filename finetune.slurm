@@ -23,12 +23,12 @@ export OMP_NUM_THREADS=1
 
 nvcc --list-gpu-arch
 python run_class_finetuning.py \
-        --model vit_giant_patch14_224 \
+        --model vit_small_patch16_224 \
         --nb_classes 500 \
         --data_set LRW \
         --data_path "/home/yxwang/Dataset/LRW/videoMAE" \
-        --log_dir "/home/yxwang/videoMAE/checkpoints/ft_post_pretraining15" \
-        --output_dir "/home/yxwang/videoMAE/checkpoints/ft_post_pretraining15" \
+        --log_dir "/home/yxwang/videoMAE/checkpoints/ft_dl_small" \
+        --output_dir "/home/yxwang/videoMAE/checkpoints/ft_dl_small" \
         --batch_size 1 \
         --input_size 224 \
         --short_side_size 224 \

@@ -377,8 +377,29 @@ class ViT_VSR(nn.Module):
         mask = (1 - mask.flip([-1]).cumsum(-1).flip([-1])).bool()
         return mask
 
-    def inference(self, inputBatch, maskw2v, device, Lambda, beamWidth, eosIx, blank):
-        encodedBatch, inputLenBatch, mask = self.pre_model(inputBatch, maskw2v)
+    def inference(self, src, tgt, src_len, tgt_len):
+        B = src.size(0)
+        eosIx = 39
+        beamWidth = 5
+        blank = 0
+        device = src.device
+        Lambda = 0.1
+        # T = src.size(2)
+        with torch.no_grad():
+            x = self.pre_model.patch_embed(src)
+            if self.pre_model.pos_embed is not None:
+                # TODO replace by dynamic length pe
+                x = x + self.get_sinusoid_encoding_table(x.shape[1], x.shape[2]).type_as(x).to(x.device).clone().detach()
+            x = self.pre_model.pos_drop(x)
+            for blk in self.pre_model.blocks:
+                if self.pre_model.with_cp:
+                    x = cp.checkpoint(blk, x)
+                else:
+                    x = blk(x)
+        # B x (T'x14x14) x 384
+        x = x.reshape(B, -1, 196, 384)
+        x = x.mean(dim=2)
+        # B x T' x 384
         CTCOutputConv = self.jointOutputConv
         attentionDecoder = self.jointAttentionDecoder
         attentionOutputConv = self.jointAttentionOutputConv
@@ -388,7 +409,7 @@ class ViT_VSR(nn.Module):
         CTCOutputBatch = CTCOutputBatch.transpose(1, 2)
         # claim batch and time step
         batch = CTCOutputBatch.shape[0]
-        T = inputLenBatch.cpu()
+        T = src_len.cpu()
         # claim CTClogprobs and Length
         CTCOutputBatch = CTCOutputBatch.cpu()
         CTCOutLogProbs = F.log_softmax(CTCOutputBatch, dim=-1)
